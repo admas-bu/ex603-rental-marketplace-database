@@ -29,14 +29,30 @@ Most of these questions come back to querying viewings, joining them to properti
 
 The database has six relations: the five roles required by the theme and one supporting relation.
 
-| Role       | Relation            | Primary key                 | Purpose                                                  |
-| ---------- | ------------------- | --------------------------- | -------------------------------------------------------- |
-| actor      | `renters`           | `renter_id`                 | Renters who book property viewings                       |
-| producer   | `properties`        | `property_id`               | Rental listings available on the platform                |
-| event      | `viewings`          | `viewing_id`                | One row for each scheduled property viewing              |
-| catalog    | `amenities`         | `amenity_id`                | Features used to describe and classify listings          |
-| junction   | `listing_amenities` | `(property_id, amenity_id)` | Many-to-many link between listings and amenities         |
-| supporting | `addresses`         | `address_id`                | Shared address structure for both renters and properties |
+| Role       | Relation            | Primary key                 | Purpose                                                                 |
+| ---------- | ------------------- | --------------------------- | ----------------------------------------------------------------------- |
+| actor      | `renters`           | `renter_id`                 | Renters who book property viewings; supports referrals between renters  |
+| producer   | `properties`        | `property_id`               | Rental listings, including rent, availability, and rent per square foot |
+| event      | `viewings`          | `viewing_id`                | One row for each scheduled property viewing                             |
+| catalog    | `amenities`         | `amenity_id`                | Features used to describe and classify listings                         |
+| junction   | `listing_amenities` | `(property_id, amenity_id)` | Many-to-many link between listings and amenities                        |
+| supporting | `addresses`         | `address_id`                | Shared address structure for both renters and properties                |
+
+Design decisions a reader should notice:
+
+- **Surrogate keys are used everywhere except the junction table.** This keeps foreign keys stable even if something like an email or amenity name changes. `email` and `amenities.name` are still unique, but they are treated as candidate keys rather than primary keys.
+
+- **There are three different `ON DELETE` behaviors: `SET NULL`, `RESTRICT`, and `CASCADE`.** The choice depends on what should happen to the child when its parent is removed. Viewings are kept as historical records, so they are never deleted with a renter or property. Listings are normally retired using `is_active` instead of being deleted. The full breakdown is in [`analysis/unit2.md`](analysis/unit2.md).
+
+- **`duration_min` is populated only when a viewing is `completed`.** Two table-level `CHECK` constraints enforce this so later aggregate queries do not silently use incomplete or invalid viewing data.
+
+- **`renters` has a recursive foreign key for referrals.** `referred_by_renter_id` points back to another renter, with a `CHECK` constraint preventing someone from referring themselves.
+
+- **`rent_per_sqft` is a stored generated column.** Since this is something renters could sort or filter listings by, storing the generated value also gives the option to index it.
+
+- **Closed vocabularies use `CHECK` constraints instead of separate lookup tables.** These lists are short and stable, and they do not have any additional attributes that would justify their own tables.
+
+- **Every constraint is named** using `pk_`, `fk_`, `uq_`, and `chk_` prefixes. This makes constraint violations much easier to understand when something fails.
 
 ## Query catalogue
 
@@ -58,4 +74,17 @@ _Linked in Unit 6._
 
 ## How to run it
 
-_Commands added once the DDL exists in Unit 2._
+## How to run it
+
+Requires PostgreSQL 14 or later and `psql`. Assumes a running server and nothing else.
+
+```bash
+# 1. Create the database (once)
+createdb ex603_rental_marketplace
+
+# 2. Build the schema (safe to re-run; the script resets itself)
+psql -d ex603_rental_marketplace -f schema/schema.sql
+
+# 3. Confirm every table exists
+psql -d ex603_rental_marketplace -c '\dt'
+```
