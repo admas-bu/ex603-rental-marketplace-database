@@ -53,7 +53,7 @@ The FULL OUTER JOIN also returns 202 rows: 200 matched, 2 properties with no vie
 
 ### Part C — NOT EXISTS vs EXCEPT (queries 5.2c-i to 5.2c-iii)
 
-Both approaches return properties 14 and 15, and a two-way `EXCEPT` between their results is empty. `NOT EXISTS` checks each property for a matching viewing and returns the whole property row. `EXCEPT` subtracts one set of IDs from another, so it can only return the compared column and needs another join to get anything else. It also removes duplicates. Both are NULL-safe, unlike `NOT IN`.
+Both approaches return properties 14 and 15, and a two-way EXCEPT between their results is empty, so they identify the same producers. NOT EXISTS checks each property for a matching viewing and can return the whole property row, while EXCEPT subtracts one set of IDs from another, so it returns only the compared column and removes duplicates.
 
 ### Write-up
 

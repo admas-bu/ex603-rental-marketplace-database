@@ -71,8 +71,15 @@ Unit 3 and later queries run against the course reference dataset (see [How to r
 | 4 | [`q4_2.sql`](queries/unit4/q4_2.sql) | For each property, how many viewings could have been a no-show, and how many were? |
 | 4 | [`q4_2.sql`](queries/unit4/q4_2.sql) | What is the no-show rate per region, and for the platform as a whole? |
 | 4 | [`q4_2.sql`](queries/unit4/q4_2.sql) | What is a normal no-show rate for high-volume properties, and how far above it is the worst one? |
+| 5 | [`q5_1.sql`](queries/unit5/q5_1.sql) | Who booked each viewing and which property was it for (three-table join)? |
+| 5 | [`q5_1.sql`](queries/unit5/q5_1.sql) | Which amenities do the flagged properties share, and does the Gym tag explain their no-shows? |
+| 5 | [`q5_1.sql`](queries/unit5/q5_1.sql) | How do the flagged properties compare with properties at the same price or in the same city, and do the most expensive listings miss more viewings? |
+| 5 | [`q5_2.sql`](queries/unit5/q5_2.sql) | Which properties does an inner join silently drop, and do LEFT, RIGHT and FULL OUTER joins agree? |
+| 5 | [`q5_2.sql`](queries/unit5/q5_2.sql) | Which properties have never had a viewing, and do `NOT EXISTS` and `EXCEPT` find the same ones? |
+| 5 | [`q5_3.sql`](queries/unit5/q5_3.sql) | Does a CROSS JOIN return exactly the product of its inputs, and which amenities is each property missing? |
+| 5 | [`q5_3.sql`](queries/unit5/q5_3.sql) | How does PostgreSQL execute the three-table join, and where does the time go? |
 
-Write-ups: [Unit 1](analysis/unit1.md) · [Unit 2](analysis/unit2.md) · [Unit 3 finding](analysis/unit3-finding.md) · [Unit 4](analysis/unit4.md) · [Unit 4 finding](analysis/unit4-finding.md)
+Write-ups: [Unit 1](analysis/unit1.md) · [Unit 2](analysis/unit2.md) · [Unit 3 finding](analysis/unit3-finding.md) · [Unit 4](analysis/unit4.md) · [Unit 4 finding](analysis/unit4-finding.md) · [Unit 5](analysis/unit5.md) · [Unit 5 finding](analysis/unit5-finding.md)
 
 ## Technical highlights
 
@@ -83,6 +90,9 @@ Write-ups: [Unit 1](analysis/unit1.md) · [Unit 2](analysis/unit2.md) · [Unit 3
 - **Placeholder zeros in the metric (Unit 4).** Cancelled viewings store `duration_min = 0.00` instead of `NULL`, which pulls the platform average from 21.9 down to 18.1 minutes. `AVG(NULLIF(duration_min, 0))` keeps them out of the average. My own schema prevents this with a `CHECK` constraint.
 - **Conditional aggregation (Unit 4).** Total, eligible and no-show counts come from one pass using `SUM(CASE ...)`, with no `WHERE` clause. That avoids both a second scan and the dropped-group problem that two filtered queries would cause.
 - **ROLLUP without detail rows (Unit 4).** `GROUP BY ROLLUP (booking_city, property_id)` with `HAVING GROUPING(property_id) = 1` returns only the regional subtotals and the grand total, and `GROUPING()` labels the grand-total row instead of leaving it `NULL`.
+- **Finding what an inner join hides (Unit 5).** The per-property reports from Unit 4 started from `viewings`, so two listings with no viewings never appeared. A `LEFT JOIN` from `properties` surfaced them, and `NOT EXISTS` and `EXCEPT` confirmed the same two IDs. A `FULL OUTER JOIN` showed there were no orphan viewings, because the foreign key prevents them.
+- **Verifying join equivalence instead of assuming it (Unit 5).** I proved the LEFT and RIGHT JOIN versions return identical rows with `EXCEPT ALL` in both directions, comparing the 202 ungrouped rows rather than the grouped report.
+- **Reading an execution plan (Unit 5).** The three-table join runs as two Hash Joins over sequential scans. The joins finish in about 0.3 ms and the sort on `scheduled_at` takes most of the rest, so the first fix as the data grows is an index or pagination on that column, not a different join.
 
 ## What I would do differently
 
