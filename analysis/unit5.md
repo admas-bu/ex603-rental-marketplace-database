@@ -80,3 +80,50 @@ The data cannot tell me why. Possible explanations, all of which need checking o
 **4. Why identify producers who have never been active?** A listing with no viewings earns nothing, yet it still costs the platform something: it takes up space in search results and represents an owner who is probably unhappy. It may also point to a broken process, such as a listing that never finished publishing. Whatever the cause, it can only be fixed if someone knows the listing exists.
 
 **5. What action could leadership take?** Check the two listings directly: confirm they are visible in search, add the missing amenities and photos, and contact the owners. Separately, change the per-property reports to start from `properties` with a LEFT JOIN, so properties with zero viewings show up as zero instead of disappearing.
+
+
+## Task 5.3 — Join performance and execution plans
+
+### Part A — CROSS JOIN (queries 5.3a-i and 5.3a-ii)
+
+`properties` has 15 rows and `amenities` has 5. 15 × 5 = 75, and the CROSS JOIN returns 75 rows. Joining that grid to `listing_amenities` shows that 25 property/amenity pairs exist and 50 do not.
+
+### Part B — The execution plan (query 5.3b)
+
+I ran `ANALYZE` first so the planner's statistics matched the real table sizes, then `EXPLAIN` and `EXPLAIN ANALYZE` on the three-table join from 5.1a. The plan has two Hash Joins over three sequential scans, followed by a sort:
+
+1. Seq Scan on `renters` (30 rows) builds a hash table (10 kB, 1 batch).
+2. Seq Scan on `viewings` (200 rows) probes it on `renter_id`.
+3. Seq Scan on `properties` (15 rows) builds a second hash table (9 kB, 1 batch), probed on `property_id`.
+4. Sort on `scheduled_at` with an in-memory quicksort (53 kB).
+
+The estimated row counts matched the actual ones exactly at every step (200, 30, 15). Planning took 0.378 ms and execution 0.626 ms. The timings show where the work went: both joins and all three scans were finished at 0.302 ms, and the sort took the query to 0.526 ms, so sorting accounted for roughly 40% of the run.
+
+### Write-up
+
+**1. When could a Cartesian product be useful?** As an amenity-coverage grid: every property paired with every amenity, then marked present or missing. The 50 missing pairs could drive a "complete your listing" prompt for owners, and the grid shows at a glance that properties 13, 14, and 15 have no amenities at all. The same pattern could generate every property × time-slot combination for a booking calendar. A Cartesian product is a mistake when it comes from a missing join condition. Joining `viewings` to `renters` without an `ON` clause would return 200 × 30 = 6,000 rows, and every count built on it would be wrong.
+
+**2. Which join algorithms did PostgreSQL choose?** Hash Join for both joins: `viewings` to `renters` on `renter_id`, then that result to `properties` on `property_id`.
+
+**3. What in the plan explains those choices?**
+
+- The query has no `WHERE` clause, so every row of every table is needed, and the Seq Scans read each table exactly once.
+- The two tables being hashed are tiny (30 and 15 rows). Each hash table fits in memory in a single batch (10 kB and 9 kB), so building them is nearly free.
+- PostgreSQL hashed the smaller tables and streamed the larger `viewings` table through them, which is the standard way to set up a hash join.
+- The only indexes are the primary keys. There is no index on `viewings.renter_id` or `viewings.property_id`, because PostgreSQL does not create indexes for foreign-key columns automatically. A Nested Loop would have to probe once per viewing, and a Merge Join would have to sort both inputs on the join key first.
+
+**4. Why is it useful to understand the selected algorithms?** The plan shows where the time goes and what would make it go away. Here the joins finished in 0.3 ms and the sort took most of the rest, so if this report grows, the first fix is an index or pagination on `scheduled_at`, not a change to the joins. The plan also shows whether the planner's estimates are accurate. Every estimate here matched the actual row count, but without up-to-date statistics PostgreSQL falls back on default guesses about table size, and badly wrong estimates are the most common cause of a poor plan.
+
+**5. What changes might make another join algorithm more appropriate?**
+
+- A selective filter, such as one property's viewings, makes a Nested Loop cheaper, especially with an index on `viewings.property_id`.
+- Two large inputs that are already sorted on the join key, for example through indexes, make a Merge Join more attractive.
+- A hash table that no longer fits in `work_mem` spills to disk in batches, which makes hashing less attractive.
+
+## Reflection
+
+On this dataset, PostgreSQL chose two Hash Joins with sequential scans. That is the right plan when every table is small and the query needs every row: it hashes the 30 renters and 15 properties once (10 kB and 9 kB, one batch each) and reads the 200 viewings a single time.
+
+Three kinds of change would push it toward a different algorithm. The first is a selective filter. If the query asked for one property's viewings, only a handful of rows would match, and a Nested Loop that looks each one up becomes cheaper than building hash tables. An index on `viewings.property_id`, which PostgreSQL does not create automatically for a foreign key, would make those lookups fast. The second is size on both sides. A Hash Join stays cheap only while the smaller table fits in `work_mem`. If renters grew into the millions, the hash would spill to disk in batches, and a Merge Join over inputs already sorted by an index on the join key could win. The third is the number of matching rows. When a join matches most rows, scanning everything is cheaper than millions of index lookups, so the planner stays with hashing.
+
+Growth in viewings alone would not change the join algorithm, because renters and properties would still be small. It would make the sequential scan and the sort on `scheduled_at` expensive. An index on `scheduled_at` with a `LIMIT`, so the report is paginated, would address that.
