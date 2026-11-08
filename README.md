@@ -83,8 +83,6 @@ Write-ups: [Unit 1](analysis/unit1.md) · [Unit 2](analysis/unit2.md) · [Unit 3
 
 ## Technical highlights
 
-## Technical highlights
-
 - **NULL-safe filtering (Unit 3).** The dashboard's 44% no-show rate came from `no_show_reason <> 'Property withdrawn'`, which silently drops every row where the reason is `NULL`, and that was every viewing that actually took place. Rewriting it with `IS DISTINCT FROM` (or `IS NULL OR ...`) restored the correct rate of about 6%.
 - **Three ways to write a semi-join (Unit 3).** `IN`, a CTE and `EXISTS` return the same renters, and I proved it with set operations instead of comparing results by eye. I also showed where a plain join would duplicate renters who had more than one disputed viewing.
 - **Placeholder zeros in the metric (Unit 4).** Cancelled viewings store `duration_min = 0.00` instead of `NULL`, which pulls the platform average from 21.9 down to 18.1 minutes. `AVG(NULLIF(duration_min, 0))` keeps them out of the average. My own schema prevents this with a `CHECK` constraint.
