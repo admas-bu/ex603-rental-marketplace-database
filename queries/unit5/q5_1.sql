@@ -74,3 +74,17 @@ JOIN stats sa ON sa.property_id = a.property_id
 JOIN stats sb ON sb.property_id = b.property_id
 WHERE a.property_id IN (2, 3)
 ORDER BY a.property_id, peer_rate_pct DESC NULLS LAST, b.property_id;
+
+
+-- 5.1d Is the no-show rate higher among the most expensive listings?
+-- Requirement: supports the 5.1 self-join finding with pooled rates by price tier.
+SELECT CASE WHEN p.monthly_rent > 3000 THEN 'above $3,000' ELSE '$3,000 or less' END AS price_tier,
+       COUNT(DISTINCT p.property_id)                                                  AS properties,
+       COUNT(v.viewing_id) FILTER (WHERE v.no_show_reason IS DISTINCT FROM 'Property withdrawn') AS eligible,
+       COUNT(v.viewing_id) FILTER (WHERE v.no_show_reason = 'Renter no show')                    AS no_shows,
+       ROUND(100.0 * COUNT(v.viewing_id) FILTER (WHERE v.no_show_reason = 'Renter no show')
+             / COUNT(v.viewing_id) FILTER (WHERE v.no_show_reason IS DISTINCT FROM 'Property withdrawn'), 1) AS rate_pct
+FROM properties p
+JOIN viewings v ON v.property_id = p.property_id
+GROUP BY 1
+ORDER BY 1 DESC;
