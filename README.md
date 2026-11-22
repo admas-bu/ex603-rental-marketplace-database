@@ -3,6 +3,8 @@
 **Author:** Admas
 **Theme:** Rental Marketplace (theme 4)
 
+**A PostgreSQL database for a rental marketplace, and a six-unit SQL analysis of why renters miss property viewings and whether the platform is getting better or worse.**
+
 This project is a PostgreSQL database for a rental marketplace. It tracks renters, the properties they are interested in, the viewings they schedule, and the amenities associated with each listing. The goal is to have a schema that can answer practical marketplace questions around listing demand, renter behavior, and which property features drive the most interest.
 
 All renter and property data in this repository is synthetic. No real people or addresses are used.
@@ -22,6 +24,8 @@ I treat viewings as the fact table because it is where most of the activity and 
 This structure lets the database answer questions that would matter to someone operating the marketplace. For example: Which properties are getting the most viewings? Are virtual viewings shorter than in-person ones? Does viewing duration correlate with renter interest? Which amenities are associated with longer viewings? How does the rent-to-deposit ratio differ across property types? How does viewing activity change by day of the week or throughout the year?
 
 Most of these questions come back to querying viewings, joining them to properties, and using listing_amenities when property features are part of the analysis.
+
+From Unit 3 on, the analysis follows one question from leadership. A dashboard reported that almost half of all viewings ended in a renter no-show. Units 3 to 6 check that number, find the real rate, identify which properties are behind it, look for listings the reports were missing, and finally answer whether the platform is getting better or worse and what the team should do next quarter.
 
 ## Schema
 
@@ -54,6 +58,28 @@ Design decisions a reader should notice:
 
 - **Every constraint is named** using `pk_`, `fk_`, `uq_`, and `chk_` prefixes. This makes constraint violations much easier to understand when something fails.
 
+### Course dataset (Unit 3 onward)
+
+The queries run against the course reference dataset, [`data/rental.sql`](data/rental.sql), which was provided in Unit 3 and is not my Unit 1–2 design. It has the same roles with slightly different columns. The tables my analysis uses:
+
+| Table | Rows | Used for |
+| ----- | ---- | -------- |
+| `viewings` | 200 | The event. One row per viewing in 2023, with `scheduled_at`, `duration_min` (the metric), `viewing_status` (`attended`, `cancelled`, `disputed`) and `no_show_reason`. A renter no-show is `no_show_reason = 'Renter no show'`. |
+| `properties` | 15 | The producer. City, monthly rent and whether the listing is currently available. |
+| `renters` | 30 | The actor. Who booked each viewing. |
+| `amenities` / `listing_amenities` | 5 / 25 | The catalog and junction used in Unit 5 to test whether shared features explain no-shows. |
+
+```mermaid
+erDiagram
+    renters ||--o{ viewings : books
+    properties ||--o{ viewings : "is viewed in"
+    properties ||--o{ listing_amenities : has
+    amenities ||--o{ listing_amenities : "tagged on"
+    properties ||--o{ property_features : has
+```
+
+Two quirks of this dataset matter for every query: cancelled viewings are stored with `duration_min = 0` rather than `NULL`, and `viewing_id` is assigned in blocks per property rather than in time order, so time-based queries order by `scheduled_at`.
+
 ## Query catalogue
 
 Unit 3 and later queries run against the course reference dataset (see [How to run it](#how-to-run-it)).
@@ -78,31 +104,55 @@ Unit 3 and later queries run against the course reference dataset (see [How to r
 | 5 | [`q5_2.sql`](queries/unit5/q5_2.sql) | Which properties have never had a viewing, and do `NOT EXISTS` and `EXCEPT` find the same ones? |
 | 5 | [`q5_3.sql`](queries/unit5/q5_3.sql) | Does a CROSS JOIN return exactly the product of its inputs, and which amenities is each property missing? |
 | 5 | [`q5_3.sql`](queries/unit5/q5_3.sql) | How does PostgreSQL execute the three-table join, and where does the time go? |
+| 6 | [`q6_1.sql`](queries/unit6/q6_1.sql) | Is each viewing unusually long or short for its own property, and how many rows do the window and GROUP BY versions return? |
+| 6 | [`q6_1.sql`](queries/unit6/q6_1.sql) | How do ROW_NUMBER, RANK and DENSE_RANK order properties by viewings when two are tied, and does NTILE split tied properties into different bands? |
+| 6 | [`q6_2.sql`](queries/unit6/q6_2.sql) | For property 2, how does each viewing's length compare with the one before and after it? |
+| 6 | [`q6_2.sql`](queries/unit6/q6_2.sql) | Is the platform on track for 50 viewings a quarter, and is the no-show rate drifting up or down over the last 30 viewings? |
+| 6 | [`q6_2.sql`](queries/unit6/q6_2.sql) | Which properties went more than 90 days without a viewing, and was the rest of the platform active during the gap? |
+| 6 | [`q6_3.sql`](queries/unit6/q6_3.sql) | What were the three longest viewings at each property? |
+| 6 | [`q6_3.sql`](queries/unit6/q6_3.sql) | How did bookings and the no-show rate change month over month, and is any month missing? |
 
-Write-ups: [Unit 1](analysis/unit1.md) · [Unit 2](analysis/unit2.md) · [Unit 3 finding](analysis/unit3-finding.md) · [Unit 4](analysis/unit4.md) · [Unit 4 finding](analysis/unit4-finding.md) · [Unit 5](analysis/unit5.md) · [Unit 5 finding](analysis/unit5-finding.md)
+Write-ups: [Unit 1](analysis/unit1.md) · [Unit 2](analysis/unit2.md) · [Unit 3 finding](analysis/unit3-finding.md) · [Unit 4](analysis/unit4.md) · [Unit 4 finding](analysis/unit4-finding.md) · [Unit 5](analysis/unit5.md) · [Unit 5 finding](analysis/unit5-finding.md) · [Unit 6](analysis/unit6.md) · [Unit 6 finding](analysis/unit6-finding.md)
+
+Screenshots of every query running with its results are in [`screenshots/`](screenshots/).
 
 ## Technical highlights
 
-- **NULL-safe filtering (Unit 3).** The dashboard's 44% no-show rate came from `no_show_reason <> 'Property withdrawn'`, which silently drops every row where the reason is `NULL`, and that was every viewing that actually took place. Rewriting it with `IS DISTINCT FROM` (or `IS NULL OR ...`) restored the correct rate of about 6%.
-- **Three ways to write a semi-join (Unit 3).** `IN`, a CTE and `EXISTS` return the same renters, and I proved it with set operations instead of comparing results by eye. I also showed where a plain join would duplicate renters who had more than one disputed viewing.
-- **Placeholder zeros in the metric (Unit 4).** Cancelled viewings store `duration_min = 0.00` instead of `NULL`, which pulls the platform average from 21.9 down to 18.1 minutes. `AVG(NULLIF(duration_min, 0))` keeps them out of the average. My own schema prevents this with a `CHECK` constraint.
-- **Conditional aggregation (Unit 4).** Total, eligible and no-show counts come from one pass using `SUM(CASE ...)`, with no `WHERE` clause. That avoids both a second scan and the dropped-group problem that two filtered queries would cause.
-- **ROLLUP without detail rows (Unit 4).** `GROUP BY ROLLUP (booking_city, property_id)` with `HAVING GROUPING(property_id) = 1` returns only the regional subtotals and the grand total, and `GROUPING()` labels the grand-total row instead of leaving it `NULL`.
-- **Finding what an inner join hides (Unit 5).** The per-property reports from Unit 4 started from `viewings`, so two listings with no viewings never appeared. A `LEFT JOIN` from `properties` surfaced them, and `NOT EXISTS` and `EXCEPT` confirmed the same two IDs. A `FULL OUTER JOIN` showed there were no orphan viewings, because the foreign key prevents them.
-- **Verifying join equivalence instead of assuming it (Unit 5).** I proved the LEFT and RIGHT JOIN versions return identical rows with `EXCEPT ALL` in both directions, comparing the 202 ungrouped rows rather than the grouped report.
-- **Reading an execution plan (Unit 5).** The three-table join runs as two Hash Joins over sequential scans. The joins finish in about 0.3 ms and the sort on `scheduled_at` takes most of the rest, so the first fix as the data grows is an index or pagination on that column, not a different join.
+- **NULL-safe filtering (Unit 3).** The dashboard's 44% no-show rate came from `no_show_reason <> 'Property withdrawn'`, which silently drops every row where the reason is `NULL`, and that was every viewing that actually took place. Rewriting it with `IS DISTINCT FROM` restored the correct rate of 6.2%.
+- **Conditional aggregation with placeholder zeros (Unit 4).** Total, eligible and no-show counts come from one pass using `COUNT(*) FILTER (...)` and `SUM(CASE ...)`. Cancelled viewings store `duration_min = 0.00`, which pulls the platform average from 21.9 down to 18.1 minutes, so `AVG(NULLIF(duration_min, 0))` keeps them out.
+- **Finding what an inner join hides (Unit 5).** The per-property reports started from `viewings`, so two listings with no viewings never appeared. A `LEFT JOIN` from `properties` surfaced them, and `NOT EXISTS` and `EXCEPT` confirmed the same two IDs.
+- **Window functions that keep every row (Unit 6).** A running total, `SUM(...) OVER (PARTITION BY quarter ORDER BY day ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`, shows how close each quarter got to its booking target day by day, which a plain `SUM` cannot. `LAG()` in a CTE finds the longest gap between a property's viewings, filtered in the outer query because a window result can't be used in `WHERE`.
+- **Making tie handling a deliberate choice (Unit 6).** Ranking properties with `ROW_NUMBER`, `RANK` and `DENSE_RANK` side by side shows two properties with 18 viewings getting different positions under each. `NTILE(4)` puts the same two properties in different demand bands, because it splits by row count and ignores values.
 
-## What I would do differently
+## Findings and recommendations
 
-_Written in Unit 6._
+1. **The 44% no-show rate was a reporting bug. The real rate is 6.2%.** A filter dropped every viewing without a no-show reason, which shrank the denominator (Unit 3). Agent commissions had been frozen on the wrong number. *Recommendation:* build every rate from the full set of rows and show its denominator next to it.
+2. **No-shows are concentrated, and the rate is flat.** Properties 2 and 3 account for 5 of the 12 no-shows (Unit 4). Shared amenities, price and city don't explain it on their own (Unit 5). Across the year the rate held between 5% and 8%: 7.1% in the first half and 5.3% in the second (Unit 6). *Recommendation:* add day-before reminders and one consistent agent at properties 2 and 3, and report the rate by quarter rather than by month, where 0–2 no-shows make it jump from 0% to 18%.
+3. **Booking volume is the bigger risk.** The platform missed a 50-per-quarter target in Q2 and Q4 (48 each), bookings fell 47.6% in March, three properties went more than 90 days without a viewing, and two had none all year (Units 5 and 6). *Recommendation:* track bookings against target weekly, and review the listings that are getting no interest before the next quarter starts.
+
+The full recommendation for next quarter is in the [Unit 6 closing memo](analysis/unit6-finding.md).
+
+## Limitations and future improvements
+
+The biggest limitation is the size of the data. It covers a single year with 193 eligible viewings and only 12 no-shows, so a change of one or two missed viewings moves any rate by several points. That is enough to say the no-show rate is not rising, but not enough to prove it is falling or to tell a real difference between properties from chance.
+
+The dataset also doesn't record what would explain the patterns: which agent ran each viewing, whether a confirmation or reminder was sent, or how many renters looked at a listing without booking. With that data, the next step would be to compare no-show rates by agent and by reminder status, and to measure listing views against bookings to find out why demand dropped in March and April.
 
 ## Video presentation
 
-_Linked in Unit 6._
+[Watch the presentation (YouTube)](WIP)
 
 ## How to run it
 
-Requires PostgreSQL 14 or later and `psql`. Assumes a running server and nothing else.
+Requires PostgreSQL 14 or later and `psql`. Assumes a running server and nothing else. Run the commands from the root of this repository.
+
+### Course dataset and analysis queries (Unit 3 onward)
+
+```bash
+createdb ex603_data
+psql -d ex603_data -f data/rental.sql        # safe to re-run; drops and reloads every table
+psql -d ex603_data -f queries/unit6/q6_1.sql # any file in queries/ runs the same way
+```
 
 ### My schema (Units 1–2)
 
@@ -110,14 +160,4 @@ Requires PostgreSQL 14 or later and `psql`. Assumes a running server and nothing
 createdb ex603_rental_marketplace
 psql -d ex603_rental_marketplace -f schema/schema.sql   # safe to re-run; resets itself
 psql -d ex603_rental_marketplace -c '\dt'
-```
-
-### Course dataset (Unit 3 onward)
-
-The queries in `queries/` run against the course's reference dataset (`data/rental.sql`), not against my schema above.
-
-```bash
-createdb ex603_data
-psql -d ex603_data -f rental.sql
-psql -d ex603_data -f queries/unit4/q4_1.sql
 ```
