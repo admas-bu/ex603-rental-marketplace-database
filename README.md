@@ -140,7 +140,7 @@ The dataset also doesn't record what would explain the patterns: which agent ran
 
 ## Video presentation
 
-[Watch the presentation (YouTube)](WIP)
+[Watch the presentation (YouTube)]([WIP](https://bostonu.zoom.us/rec/share/bs-36JHX0SGIkPOAIOBDIKPjXAkyJ4_yr9qFPMeTyq-TOx5sBaNERud1ff5P-YqB.svhgF32VlWutIJmg))
 
 ## How to run it
 
